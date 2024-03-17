@@ -329,10 +329,10 @@ class VannaFlaskApp:
                 )
 
         @self.flask_app.route("/api/v0/generate_summary", methods=["GET"])
-        @self.requires_cache(["df", "question"])
-        def generate_summary(id: str, df, question):
+        @self.requires_cache(["df", "question","sql"])
+        def generate_summary(id: str, df, question, sql):
             if self.allow_llm_to_see_data:
-                summary = vn.generate_summary(question=question, df=df)
+                summary = vn.generate_summary(question=question, df=df, sql=sql)
                 return jsonify(
                     {
                         "type": "text",
