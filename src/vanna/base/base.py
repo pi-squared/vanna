@@ -103,10 +103,12 @@ class VannaBase(ABC):
         Returns:
             str: The SQL query that answers the question.
         """
+        initial_prompt = self.config.get("initial_prompt", None)
         question_sql_list = self.get_similar_question_sql(question, **kwargs)
         ddl_list = self.get_related_ddl(question, **kwargs)
         doc_list = self.get_related_documentation(question, **kwargs)
         prompt = self.get_sql_prompt(
+            initial_prompt=initial_prompt,
             question=question,
             question_sql_list=question_sql_list,
             ddl_list=ddl_list,
@@ -187,7 +189,7 @@ class VannaBase(ABC):
 
         return [q["question"] for q in question_sql]
 
-    def generate_summary(self, question: str, df: pd.DataFrame, **kwargs) -> str:
+    def generate_summary(self, question: str, df: pd.DataFrame,sql: str, **kwargs) -> str:
         """
         **Example:**
         ```python
@@ -206,16 +208,30 @@ class VannaBase(ABC):
 
         message_log = [
             self.system_message(
-                f"You are a helpful data assistant. The user asked the question: '{question}'\n\nThe following is a pandas DataFrame with the results of the query: \n{df.to_markdown()}\n\n"
+                f"You are a helpful data assistant. The user asked the question: '{question}'\n\n The following SQL was generated: \n {sql}\n\n The following is a pandas DataFrame with the results of the query: \n{df.to_markdown()}\n\n "
             ),
             self.user_message(
-                "Briefly summarize the data based on the question that was asked. Do not respond with any additional explanation beyond the summary."
+                "Assess the SQL code and determine if it is to be corrected. Perform the correction if needed and return the correct SQL code. You will only respond with SQL code and not with any explanations.\n\nRespond with only SQL code. Do not answer with any explanations -- just the code.\n"
             ),
         ]
+        initial_prompt = f"You are a helpful data assistant. The user asked the question: '{question}'\n\n The following SQL was generated: \n {sql}\n\n The following is a pandas DataFrame with the results of the query: \n{df.to_markdown()}\n\n Assess the SQL code and determine if it is to be corrected. Perform the correction if needed and return the correct SQL code. You will only respond with SQL code and not with any explanations.\n\nRespond with only SQL code. Do not answer with any explanations -- just the code.\n"
+        #initial_prompt = self.config.get("initial_prompt", None)
+        question_sql_list = self.get_similar_question_sql(question, **kwargs)
+        ddl_list = self.get_related_ddl(question, **kwargs)
+        doc_list = self.get_related_documentation(question, **kwargs)
+        prompt = self.get_sql_prompt(
+            initial_prompt=initial_prompt,
+            question=question,
+            question_sql_list=question_sql_list,
+            ddl_list=ddl_list,
+            doc_list=doc_list,
+            **kwargs,
+        )
+        #self.log(prompt)
+        llm_response = self.submit_prompt(prompt, **kwargs)
+        #self.log(llm_response)
 
-        summary = self.submit_prompt(message_log, **kwargs)
-
-        return summary
+        return self.extract_sql(llm_response)
 
     # ----------------- Use Any Embeddings API ----------------- #
     @abstractmethod
@@ -405,6 +421,7 @@ class VannaBase(ABC):
 
     def get_sql_prompt(
         self,
+        initial_prompt : str,
         question: str,
         question_sql_list: list,
         ddl_list: list,
@@ -434,8 +451,9 @@ class VannaBase(ABC):
         Returns:
             any: The prompt for the LLM to generate SQL.
         """
-        initial_prompt = "The user provides a question and you provide SQL. You will only respond with SQL code and not with any explanations.\n\nRespond with only SQL code. Do not answer with any explanations -- just the code.\n"
-
+        if initial_prompt is None:
+            initial_prompt = "The user provides a question and you provide SQL. You will only respond with SQL code and not with any explanations.\n\nRespond with only SQL code. Do not answer with any explanations -- just the code.\n"
+        
         initial_prompt = self.add_ddl_to_prompt(
             initial_prompt, ddl_list, max_tokens=100000
         )
